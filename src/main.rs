@@ -2,6 +2,7 @@ use bevy::ecs::query::QuerySingleError;
 use bevy::input::common_conditions::input_just_pressed;
 use bevy::prelude::*;
 use bevy::sprite::MaterialMesh2dBundle;
+use bevy::utils::petgraph::visit::Walker;
 use bevy::window::PrimaryWindow;
 use bevy_rapier2d::prelude::*;
 use rand::seq::SliceRandom;
@@ -329,7 +330,7 @@ fn drop_preview(
                         transform: Transform::from_translation(Vec3::new(
                             x,
                             FRUIT_SPAWN_HEIGHT,
-                            0.0,
+                            2.0,
                         ))
                         .with_scale(Vec3::splat(current_fruit_type.0.size())),
                         ..default()
@@ -393,6 +394,11 @@ fn drop_fruit(
                 angular_damping: 1000.0,
             },
             ActiveEvents::COLLISION_EVENTS,
+            ExternalImpulse {
+                impulse: Vec2::new(0.0, -100.0),
+                ..default()
+            },
+            ColliderMassProperties::Density(10.0)
         ));
 
         timer.0.reset();
@@ -415,24 +421,34 @@ struct HasCollided;
 
 fn handle_collisions(
     mut commands: Commands,
-    mut collision_events: EventReader<CollisionEvent>,
+    rapier_context: Res<RapierContext>,
     fruit_materials: Res<FruitMaterialHandles>,
+    fruit_entity_query: Query<Entity, With<Fruit>>,
     mut fruit_query: Query<(&mut Fruit, &mut Transform, &mut Handle<ColorMaterial>)>,
     has_collided_query: Query<&HasCollided>,
     sound: Res<MergeSound>,
 ) {
     // might need to make this func faster or blocking or something
+    for entity1 in fruit_entity_query.iter() {
+        for entity2 in fruit_entity_query.iter() {
+            let contact_pair = rapier_context.contact_pair(entity1, entity2);
+            if contact_pair.is_none() {
+                continue;
+            }
 
-    for event in collision_events.read() {
-        if let CollisionEvent::Started(entity1, entity2, ..) = event {
-            if let Some(fruit1) = fruit_query.get_component::<Fruit>(*entity1).ok() {
-                if let Some(fruit2) = fruit_query.get_component::<Fruit>(*entity2).ok() {
-                    if has_collided_query.get(*entity1).is_err() {
-                        commands.entity(*entity1).try_insert(HasCollided);
+            if !contact_pair.unwrap().has_any_active_contacts() {
+                continue;
+            }
+            println!("{:?} contacting {:?}", entity1, entity2);
+
+            if let Some(fruit1) = fruit_query.get_component::<Fruit>(entity1).ok() {
+                if let Some(fruit2) = fruit_query.get_component::<Fruit>(entity2).ok() {
+                    if has_collided_query.get(entity1).is_err() {
+                        commands.entity(entity1).try_insert(HasCollided);
                     }
 
-                    if has_collided_query.get(*entity2).is_err() {
-                        commands.entity(*entity2).try_insert(HasCollided);
+                    if has_collided_query.get(entity2).is_err() {
+                        commands.entity(entity2).try_insert(HasCollided);
                     }
 
                     if fruit1.0 == fruit2.0 {
@@ -444,10 +460,10 @@ fn handle_collisions(
 
                         let new_fruit_type = new_fruit_type.unwrap();
 
-                        commands.entity(*entity2).despawn();
+                        commands.entity(entity2).despawn();
 
                         if let Some((mut fruit, mut transform, mut material)) =
-                            fruit_query.get_mut(*entity1).ok()
+                            fruit_query.get_mut(entity1).ok()
                         {
                             fruit.0 = new_fruit_type.clone();
                             transform.scale = Vec3::splat(new_fruit_type.size());
@@ -455,8 +471,7 @@ fn handle_collisions(
                         }
 
                         commands.spawn(AudioBundle {
-                            source: sound.0.choose(&mut rand::thread_rng()).unwrap()
-                                .clone(),
+                            source: sound.0.choose(&mut rand::thread_rng()).unwrap().clone(),
                             settings: PlaybackSettings::DESPAWN,
                         });
                     }
@@ -530,7 +545,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(1.0))
-        // .add_plugins(RapierDebugRenderPlugin::default())
+        .add_plugins(RapierDebugRenderPlugin::default())
         .add_plugins(FruitMaterialsPlugin)
         .add_state::<State>()
         .insert_resource(DropTimer(Timer::from_seconds(
@@ -539,7 +554,7 @@ fn main() {
         )))
         .insert_resource(CurrentFruitType(FruitType::random()))
         .add_systems(Startup, setup)
-        .add_systems(Update, handle_collisions)
+        // .add_systems(FixedUpdate, handle_collisions)
         .add_systems(
             Update,
             (
