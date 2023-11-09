@@ -4,6 +4,7 @@ use bevy::prelude::*;
 use bevy::sprite::MaterialMesh2dBundle;
 use bevy::window::PrimaryWindow;
 use bevy_rapier2d::prelude::*;
+use rand::seq::SliceRandom;
 
 const GRAVITY: f32 = -10.0;
 const LEFT_WALL: f32 = -400.0;
@@ -228,7 +229,41 @@ enum State {
 #[derive(Resource)]
 struct DropTimer(Timer);
 
-fn setup(mut commands: Commands) {
+#[derive(Resource)]
+struct MergeSound(Vec<Handle<AudioSource>>);
+
+#[derive(Resource)]
+struct SpawnSound(Handle<AudioSource>);
+
+fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
+    let merge_sound_0 = asset_server.load("sounds/pop0.ogg");
+    let merge_sound_1 = asset_server.load("sounds/pop1.ogg");
+    let merge_sound_2 = asset_server.load("sounds/pop2.ogg");
+    let merge_sound_3 = asset_server.load("sounds/pop3.ogg");
+    let merge_sound_4 = asset_server.load("sounds/pop4.ogg");
+    let merge_sound_5 = asset_server.load("sounds/pop5.ogg");
+    let merge_sound_6 = asset_server.load("sounds/pop6.ogg");
+    let merge_sound_7 = asset_server.load("sounds/pop7.ogg");
+    let merge_sound_8 = asset_server.load("sounds/pop8.ogg");
+    let merge_sound_9 = asset_server.load("sounds/pop9.ogg");
+    let merge_sound_10 = asset_server.load("sounds/pop10.ogg");
+    commands.insert_resource(MergeSound(vec![
+        merge_sound_0,
+        merge_sound_1,
+        merge_sound_2,
+        merge_sound_3,
+        merge_sound_4,
+        merge_sound_5,
+        merge_sound_6,
+        merge_sound_7,
+        merge_sound_8,
+        merge_sound_9,
+        merge_sound_10,
+    ]));
+
+    let spawn_sound = asset_server.load("sounds/click.ogg");
+    commands.insert_resource(SpawnSound(spawn_sound));
+
     commands.spawn(Camera2dBundle::default());
 
     commands.spawn(WallBundle::new(WallLocation::Left));
@@ -317,6 +352,7 @@ fn drop_fruit(
     mut timer: ResMut<DropTimer>,
     mut current_fruit_type: ResMut<CurrentFruitType>,
     fruit_preview_query: Query<Entity, With<FruitPreview>>,
+    sound: Res<SpawnSound>,
 ) {
     if !timer.0.finished() {
         return;
@@ -360,6 +396,11 @@ fn drop_fruit(
         ));
 
         timer.0.reset();
+
+        commands.spawn(AudioBundle {
+            source: sound.0.clone(),
+            settings: PlaybackSettings::DESPAWN,
+        });
     }
 }
 
@@ -378,6 +419,7 @@ fn handle_collisions(
     fruit_materials: Res<FruitMaterialHandles>,
     mut fruit_query: Query<(&mut Fruit, &mut Transform, &mut Handle<ColorMaterial>)>,
     has_collided_query: Query<&HasCollided>,
+    sound: Res<MergeSound>,
 ) {
     // might need to make this func faster or blocking or something
 
@@ -386,11 +428,11 @@ fn handle_collisions(
             if let Some(fruit1) = fruit_query.get_component::<Fruit>(*entity1).ok() {
                 if let Some(fruit2) = fruit_query.get_component::<Fruit>(*entity2).ok() {
                     if has_collided_query.get(*entity1).is_err() {
-                        commands.entity(*entity1).insert(HasCollided);
+                        commands.entity(*entity1).try_insert(HasCollided);
                     }
 
                     if has_collided_query.get(*entity2).is_err() {
-                        commands.entity(*entity2).insert(HasCollided);
+                        commands.entity(*entity2).try_insert(HasCollided);
                     }
 
                     if fruit1.0 == fruit2.0 {
@@ -411,6 +453,12 @@ fn handle_collisions(
                             transform.scale = Vec3::splat(new_fruit_type.size());
                             *material = new_fruit_type.material(&fruit_materials);
                         }
+
+                        commands.spawn(AudioBundle {
+                            source: sound.0.choose(&mut rand::thread_rng()).unwrap()
+                                .clone(),
+                            settings: PlaybackSettings::DESPAWN,
+                        });
                     }
                 }
             }
