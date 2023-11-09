@@ -11,9 +11,10 @@ const RIGHT_WALL: f32 = 400.0;
 const BOTTOM_WALL: f32 = -300.0;
 const TOP_WALL: f32 = 300.0;
 const WALL_THICKNESS: f32 = 10.0;
-const WALL_COLOR: Color = Color::rgb(0.0, 0.7, 0.7);
+const WALL_COLOR: Color = Color::rgb(0.7, 0.7, 0.7);
 
 const FRUIT_SPAWN_HEIGHT: f32 = 200.0;
+const LOSE_HEIGHT: f32 = 200.0;
 
 const DROP_COOLDOWN: f32 = 0.5;
 
@@ -217,6 +218,13 @@ impl WallBundle {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
+enum State {
+    #[default]
+    Playing,
+    Lost,
+}
+
 #[derive(Resource)]
 struct DropTimer(Timer);
 
@@ -227,6 +235,19 @@ fn setup(mut commands: Commands) {
     commands.spawn(WallBundle::new(WallLocation::Right));
     commands.spawn(WallBundle::new(WallLocation::Bottom));
     commands.spawn(WallBundle::new(WallLocation::Top));
+
+    commands.spawn(SpriteBundle {
+        transform: Transform {
+            translation: Vec3::new(0.0, LOSE_HEIGHT, 0.0),
+            scale: Vec3::new(RIGHT_WALL - LEFT_WALL, 5.0, 1.0),
+            ..default()
+        },
+        sprite: Sprite {
+            color: Color::rgb(0.5, 0.5, 0.5),
+            ..default()
+        },
+        ..default()
+    });
 }
 
 fn clamp_to_bounds(n: f32, fruit_type: &FruitType) -> f32 {
@@ -348,11 +369,15 @@ fn tick_drop_timer(time: Res<Time>, mut timer: ResMut<DropTimer>) {
 
 // fn show_drop_preview()
 
+#[derive(Component)]
+struct HasCollided;
+
 fn handle_collisions(
     mut commands: Commands,
     mut collision_events: EventReader<CollisionEvent>,
     fruit_materials: Res<FruitMaterialHandles>,
     mut fruit_query: Query<(&mut Fruit, &mut Transform, &mut Handle<ColorMaterial>)>,
+    has_collided_query: Query<&HasCollided>,
 ) {
     // might need to make this func faster or blocking or something
 
@@ -360,6 +385,14 @@ fn handle_collisions(
         if let CollisionEvent::Started(entity1, entity2, ..) = event {
             if let Some(fruit1) = fruit_query.get_component::<Fruit>(*entity1).ok() {
                 if let Some(fruit2) = fruit_query.get_component::<Fruit>(*entity2).ok() {
+                    if has_collided_query.get(*entity1).is_err() {
+                        commands.entity(*entity1).insert(HasCollided);
+                    }
+
+                    if has_collided_query.get(*entity2).is_err() {
+                        commands.entity(*entity2).insert(HasCollided);
+                    }
+
                     if fruit1.0 == fruit2.0 {
                         let new_fruit_type = fruit1.0.merge();
 
@@ -385,12 +418,73 @@ fn handle_collisions(
     }
 }
 
+fn check_loss(
+    mut commands: Commands,
+    fruit_query: Query<&Transform, With<HasCollided>>,
+    mut next_state: ResMut<NextState<State>>,
+) {
+    for transform in fruit_query.iter() {
+        if transform.translation.y > LOSE_HEIGHT {
+            next_state.set(State::Lost);
+
+            commands.spawn(TextBundle {
+                text: Text {
+                    sections: vec![
+                        TextSection {
+                            value: "You Lost :(".to_string(),
+                            style: TextStyle {
+                                font_size: 64.0,
+                                color: Color::rgb(0.9, 0.9, 0.9),
+                                ..default()
+                            },
+                        },
+                        TextSection {
+                            value: "Click to restart".to_string(),
+                            style: TextStyle {
+                                font_size: 32.0,
+                                color: Color::rgb(0.2, 0.9, 0.2),
+                                ..default()
+                            },
+                        },
+                    ],
+                    ..default()
+                },
+                transform: Transform {
+                    translation: Vec3::new(0.0, 0.0, 0.0),
+                    ..default()
+                },
+                ..default()
+            });
+        }
+    }
+}
+
+fn restart_game(
+    mut commands: Commands,
+    fruit_query: Query<Entity, With<Fruit>>,
+    text_query: Query<Entity, With<Text>>,
+    mut next_state: ResMut<NextState<State>>,
+) {
+    for entity in fruit_query.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+
+    for entity in text_query.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+
+    commands.insert_resource(CurrentFruitType(FruitType::random()));
+
+    next_state.set(State::Playing);
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(1.0))
         // .add_plugins(RapierDebugRenderPlugin::default())
         .add_plugins(FruitMaterialsPlugin)
+        .add_state::<State>()
         .insert_resource(DropTimer(Timer::from_seconds(
             DROP_COOLDOWN,
             TimerMode::Once,
@@ -401,11 +495,19 @@ fn main() {
         .add_systems(
             Update,
             (
+                check_loss,
                 tick_drop_timer,
                 drop_preview,
                 drop_fruit.run_if(input_just_pressed(MouseButton::Left)),
             )
-                .chain(),
+                .chain()
+                .run_if(in_state(State::Playing)),
+        )
+        .add_systems(
+            Update,
+            restart_game
+                .run_if(input_just_pressed(MouseButton::Left))
+                .run_if(in_state(State::Lost)),
         )
         .run();
 }
