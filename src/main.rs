@@ -1,43 +1,9 @@
+use bevy::ecs::query::QuerySingleError;
 use bevy::input::common_conditions::input_just_pressed;
 use bevy::prelude::*;
 use bevy::sprite::MaterialMesh2dBundle;
 use bevy::window::PrimaryWindow;
 use bevy_rapier2d::prelude::*;
-use std::ops::DerefMut;
-use bevy::ecs::query::QuerySingleError;
-
-#[derive(Component)]
-struct Person;
-
-#[derive(Component)]
-struct Name(String);
-
-fn add_people(mut commands: Commands) {
-    commands.spawn((Person, Name("Elaina Proctor".to_string())));
-    commands.spawn((Person, Name("Renzo Hume".to_string())));
-    commands.spawn((Person, Name("Zayna Nieves".to_string())));
-}
-
-#[derive(Resource)]
-struct GreetTimer(Timer);
-
-fn greet_people(time: Res<Time>, mut timer: ResMut<GreetTimer>, query: Query<&Name, With<Person>>) {
-    if timer.0.tick(time.delta()).just_finished() {
-        for name in &query {
-            println!("hello {}!", name.0);
-        }
-    }
-}
-
-pub struct HelloPlugin;
-
-impl Plugin for HelloPlugin {
-    fn build(&self, app: &mut App) {
-        app.insert_resource(GreetTimer(Timer::from_seconds(2.0, TimerMode::Repeating)))
-            .add_systems(Startup, add_people)
-            .add_systems(Update, greet_people);
-    }
-}
 
 const GRAVITY: f32 = -10.0;
 const LEFT_WALL: f32 = -400.0;
@@ -58,7 +24,7 @@ struct Fruit(FruitType);
 
 #[derive(Debug, PartialEq, Clone)]
 enum FruitType {
-    Blueberry = 0,
+    Blueberry,
     Strawberry,
     Grapes,
     Lemon,
@@ -253,81 +219,23 @@ impl WallBundle {
     }
 }
 
-//     fn new_fruit(
-//         fruit_type: FruitType,
-//         x: f32,
-//         meshes: &mut ResMut<Assets<Mesh>>,
-//         fruit_materials: &mut Res<FruitMaterialHandles>,
-//     ) -> Entity {
-//          {
-//             material_mesh_2d_bundle: MaterialMesh2dBundle {
-//                 mesh: meshes.add(shape::Circle::default().into()).into(),
-//                 material: fruit_type.material(&fruit_materials),
-//                 transform: Transform::from_translation(Vec3::new(x, FRUIT_SPAWN_HEIGHT, 0.0))
-//                     .with_scale(Vec3::splat(fruit_type.size())),
-//                 ..default()
-//             },
-//             fruit: Fruit(fruit_type),
-//             collider: Collider::ball(0.5),
-//             rigid_body: RigidBody::Fixed,
-//             gravity_scale: GravityScale(100.0),
-//             velocity: Velocity::linear(Vec2::new(0.0, GRAVITY)),
-//             damping: Damping {
-//                 linear_damping: 5.0,
-//                 angular_damping: 1000.0,
-//             },
-//             active_events: ActiveEvents::COLLISION_EVENTS,
-//             current_fruit: CurrentFruit(),
-//         }
-//     }
-//
-//     fn drop(&self) {
-//         let mut rigid_body = self.rigid_body.clone();
-//         rigid_body = RigidBody::Dynamic;
-//     }
-// }
-
 #[derive(Resource)]
 struct DropTimer(Timer);
 
-fn setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut fruit_materials: Res<FruitMaterialHandles>,
-) {
+fn setup(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 
     commands.spawn(WallBundle::new(WallLocation::Left));
     commands.spawn(WallBundle::new(WallLocation::Right));
     commands.spawn(WallBundle::new(WallLocation::Bottom));
     commands.spawn(WallBundle::new(WallLocation::Top));
-
-
-    let fruit_type = FruitType::random();
-    commands.spawn((
-        MaterialMesh2dBundle {
-            mesh: meshes.add(shape::Circle::default().into()).into(),
-            material: fruit_type.material(&fruit_materials),
-            transform: Transform::from_translation(Vec3::new(0.0, FRUIT_SPAWN_HEIGHT, 0.0))
-                .with_scale(Vec3::splat(fruit_type.size())),
-            ..default()
-        },
-        Fruit(fruit_type),
-        Collider::ball(0.5),
-        RigidBody::Fixed,
-        GravityScale(100.0),
-        Velocity::linear(Vec2::new(0.0, GRAVITY)),
-        Damping {
-            linear_damping: 5.0,
-            angular_damping: 1000.0,
-        },
-        ActiveEvents::COLLISION_EVENTS,
-        CurrentFruit,
-    ));
 }
 
+#[derive(Resource)]
+struct CurrentFruitType(FruitType);
+
 #[derive(Component)]
-struct CurrentFruit;
+struct FruitPreview;
 
 fn drop_preview(
     mut commands: Commands,
@@ -335,6 +243,8 @@ fn drop_preview(
     mut fruit_materials: Res<FruitMaterialHandles>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
+    current_fruit_type: Res<CurrentFruitType>,
+    mut fruit_preview_query: Query<&mut Transform, With<FruitPreview>>,
 ) {
     let (camera, camera_transform) = camera_query.single();
 
@@ -345,22 +255,45 @@ fn drop_preview(
         .and_then(|cursor| camera.viewport_to_world(camera_transform, cursor))
         .map(|ray| ray.origin.truncate())
     {
-        let fruit_type = FruitType::random();
-
-        let left_bound = LEFT_WALL + WALL_THICKNESS + fruit_type.size();
-        let right_bound = RIGHT_WALL - WALL_THICKNESS - fruit_type.size();
+        let left_bound = LEFT_WALL + WALL_THICKNESS + current_fruit_type.0.size();
+        let right_bound = RIGHT_WALL - WALL_THICKNESS - current_fruit_type.0.size();
         let x = position.x.clamp(left_bound, right_bound);
+
+        match fruit_preview_query.get_single_mut() {
+            Ok(mut transform) => {
+                transform.translation.x = x;
+            }
+            Err(QuerySingleError::NoEntities(_)) => {
+                commands.spawn((
+                    MaterialMesh2dBundle {
+                        mesh: meshes.add(shape::Circle::default().into()).into(),
+                        material: current_fruit_type.0.material(&fruit_materials),
+                        transform: Transform::from_translation(Vec3::new(
+                            x,
+                            FRUIT_SPAWN_HEIGHT,
+                            0.0,
+                        ))
+                        .with_scale(Vec3::splat(current_fruit_type.0.size())),
+                        ..default()
+                    },
+                    Fruit(current_fruit_type.0.clone()),
+                    FruitPreview,
+                ));
+            }
+            Err(QuerySingleError::MultipleEntities(_)) => panic!("Multiple fruit previews found"),
+        }
     }
 }
 
 fn drop_fruit(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut fruit_materials: Res<FruitMaterialHandles>,
+    fruit_materials: Res<FruitMaterialHandles>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     mut timer: ResMut<DropTimer>,
-    mut current_fruit_query: Query<(Entity, &mut RigidBody, With<CurrentFruit>)>,
+    mut current_fruit_type: ResMut<CurrentFruitType>,
+    fruit_preview_query: Query<Entity, With<FruitPreview>>,
 ) {
     if !timer.0.finished() {
         return;
@@ -375,19 +308,15 @@ fn drop_fruit(
         .and_then(|cursor| camera.viewport_to_world(camera_transform, cursor))
         .map(|ray| ray.origin.truncate())
     {
-        let fruit_type = FruitType::random();
+        let fruit_type = current_fruit_type.0.clone();
+
+        commands.entity(fruit_preview_query.single()).despawn();
+
+        current_fruit_type.0 = FruitType::random();
 
         let left_bound = LEFT_WALL + WALL_THICKNESS + fruit_type.size();
         let right_bound = RIGHT_WALL - WALL_THICKNESS - fruit_type.size();
         let x = position.x.clamp(left_bound, right_bound);
-
-        let (entity, mut rigid_body, ()) = match current_fruit_query.get_single_mut() {
-            Ok((entity, rigid_body, ())) => (entity, rigid_body, ()),
-            Err(QuerySingleError::NoEntities(_)) => panic!("No entities"),
-            Err(QuerySingleError::MultipleEntities(_)) => panic!("Multiple entities"),
-        };
-        *rigid_body = RigidBody::Dynamic;
-        commands.entity(entity).remove::<CurrentFruit>();
 
         commands.spawn((
             MaterialMesh2dBundle {
@@ -399,7 +328,7 @@ fn drop_fruit(
             },
             Fruit(fruit_type),
             Collider::ball(0.5),
-            RigidBody::Fixed,
+            RigidBody::Dynamic,
             GravityScale(100.0),
             Velocity::linear(Vec2::new(0.0, GRAVITY)),
             Damping {
@@ -407,7 +336,6 @@ fn drop_fruit(
                 angular_damping: 1000.0,
             },
             ActiveEvents::COLLISION_EVENTS,
-            CurrentFruit,
         ));
 
         timer.0.reset();
@@ -429,7 +357,6 @@ fn handle_collisions(
     // might need to make this func faster or blocking or something
 
     for event in collision_events.iter() {
-        println!("totally not going to panic!");
         if let CollisionEvent::Started(entity1, entity2, ..) = event {
             if let Some(fruit1) = fruit_query.get_component::<Fruit>(*entity1).ok() {
                 if let Some(fruit2) = fruit_query.get_component::<Fruit>(*entity2).ok() {
@@ -468,13 +395,14 @@ fn main() {
             DROP_COOLDOWN,
             TimerMode::Once,
         )))
+        .insert_resource(CurrentFruitType(FruitType::random()))
         .add_systems(Startup, setup)
         .add_systems(Update, handle_collisions)
         .add_systems(
             Update,
             (
                 tick_drop_timer,
-                // show_drop_preview,
+                drop_preview,
                 drop_fruit.run_if(input_just_pressed(MouseButton::Left)),
             )
                 .chain(),
