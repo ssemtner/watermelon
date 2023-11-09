@@ -17,8 +17,6 @@ const FRUIT_SPAWN_HEIGHT: f32 = 200.0;
 
 const DROP_COOLDOWN: f32 = 0.5;
 
-const SCALE: f32 = 50.0;
-
 #[derive(Component)]
 struct Fruit(FruitType);
 
@@ -231,6 +229,12 @@ fn setup(mut commands: Commands) {
     commands.spawn(WallBundle::new(WallLocation::Top));
 }
 
+fn clamp_to_bounds(n: f32, fruit_type: &FruitType) -> f32 {
+    let left_bound = LEFT_WALL + WALL_THICKNESS + (fruit_type.size() * 0.5) + 10.0;
+    let right_bound = RIGHT_WALL - WALL_THICKNESS - (fruit_type.size() * 0.5) - 10.0;
+    n.clamp(left_bound, right_bound)
+}
+
 #[derive(Resource)]
 struct CurrentFruitType(FruitType);
 
@@ -240,7 +244,7 @@ struct FruitPreview;
 fn drop_preview(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut fruit_materials: Res<FruitMaterialHandles>,
+    fruit_materials: Res<FruitMaterialHandles>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     current_fruit_type: Res<CurrentFruitType>,
@@ -255,9 +259,7 @@ fn drop_preview(
         .and_then(|cursor| camera.viewport_to_world(camera_transform, cursor))
         .map(|ray| ray.origin.truncate())
     {
-        let left_bound = LEFT_WALL + WALL_THICKNESS + current_fruit_type.0.size();
-        let right_bound = RIGHT_WALL - WALL_THICKNESS - current_fruit_type.0.size();
-        let x = position.x.clamp(left_bound, right_bound);
+        let x = clamp_to_bounds(position.x, &current_fruit_type.0);
 
         match fruit_preview_query.get_single_mut() {
             Ok(mut transform) => {
@@ -314,9 +316,7 @@ fn drop_fruit(
 
         current_fruit_type.0 = FruitType::random();
 
-        let left_bound = LEFT_WALL + WALL_THICKNESS + fruit_type.size();
-        let right_bound = RIGHT_WALL - WALL_THICKNESS - fruit_type.size();
-        let x = position.x.clamp(left_bound, right_bound);
+        let x = clamp_to_bounds(position.x, &fruit_type);
 
         commands.spawn((
             MaterialMesh2dBundle {
@@ -356,7 +356,7 @@ fn handle_collisions(
 ) {
     // might need to make this func faster or blocking or something
 
-    for event in collision_events.iter() {
+    for event in collision_events.read() {
         if let CollisionEvent::Started(entity1, entity2, ..) = event {
             if let Some(fruit1) = fruit_query.get_component::<Fruit>(*entity1).ok() {
                 if let Some(fruit2) = fruit_query.get_component::<Fruit>(*entity2).ok() {
@@ -389,7 +389,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(1.0))
-        .add_plugins(RapierDebugRenderPlugin::default())
+        // .add_plugins(RapierDebugRenderPlugin::default())
         .add_plugins(FruitMaterialsPlugin)
         .insert_resource(DropTimer(Timer::from_seconds(
             DROP_COOLDOWN,
