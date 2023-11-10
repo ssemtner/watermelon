@@ -1,3 +1,7 @@
+mod fruit;
+mod common;
+
+use crate::fruit::collisions::HasCollided;
 use bevy::ecs::query::QuerySingleError;
 use bevy::input::common_conditions::input_just_pressed;
 use bevy::prelude::*;
@@ -6,6 +10,9 @@ use bevy::utils::petgraph::visit::Walker;
 use bevy::window::PrimaryWindow;
 use bevy_rapier2d::prelude::*;
 use rand::seq::SliceRandom;
+use crate::fruit::FruitPlugin;
+use crate::fruit::fruit_type::*;
+use crate::fruit::materials::FruitMaterials;
 
 const GRAVITY: f32 = -10.0;
 const LEFT_WALL: f32 = -400.0;
@@ -20,148 +27,6 @@ const LOSE_HEIGHT: f32 = 200.0;
 
 const DROP_COOLDOWN: f32 = 0.5;
 
-#[derive(Component)]
-struct Fruit(FruitType);
-
-#[derive(Debug, PartialEq, Clone)]
-enum FruitType {
-    Blueberry,
-    Strawberry,
-    Grapes,
-    Lemon,
-    Coconut,
-    Apple,
-    Orange,
-    Pomegranate,
-    Peach,
-    Pineapple,
-    Melon,
-    Watermelon,
-}
-
-#[derive(Resource)]
-pub struct FruitMaterialHandles {
-    pub blueberry: Handle<ColorMaterial>,
-    pub strawberry: Handle<ColorMaterial>,
-    pub grapes: Handle<ColorMaterial>,
-    pub lemon: Handle<ColorMaterial>,
-    pub coconut: Handle<ColorMaterial>,
-    pub apple: Handle<ColorMaterial>,
-    pub orange: Handle<ColorMaterial>,
-    pub pomegranate: Handle<ColorMaterial>,
-    pub peach: Handle<ColorMaterial>,
-    pub pineapple: Handle<ColorMaterial>,
-    pub melon: Handle<ColorMaterial>,
-    pub watermelon: Handle<ColorMaterial>,
-}
-
-struct FruitMaterialsPlugin;
-
-impl Plugin for FruitMaterialsPlugin {
-    fn build(&self, app: &mut App) {
-        let mut materials = app
-            .world
-            .get_resource_mut::<Assets<ColorMaterial>>()
-            .unwrap();
-
-        // FRUIT COLORS DEFINED HERE
-        let blueberry = materials.add(Color::hex("#3D4A84").unwrap().into());
-        let strawberry = materials.add(Color::hex("#E70333").unwrap().into());
-        let grapes = materials.add(Color::hex("#8E50DC").unwrap().into());
-        let lemon = materials.add(Color::hex("#FFDA45").unwrap().into());
-        let coconut = materials.add(Color::hex("#6D3F0C").unwrap().into());
-        let apple = materials.add(Color::hex("#77BA00").unwrap().into());
-        let orange = materials.add(Color::hex("#F96719").unwrap().into());
-        let pomegranate = materials.add(Color::hex("#9F1E44").unwrap().into());
-        let peach = materials.add(Color::hex("#FCB5A7").unwrap().into());
-        let pineapple = materials.add(Color::hex("#F6DF0D").unwrap().into());
-        let melon = materials.add(Color::hex("#8CB925").unwrap().into());
-        let watermelon = materials.add(Color::hex("#6CCD15").unwrap().into());
-
-        app.insert_resource(FruitMaterialHandles {
-            blueberry,
-            strawberry,
-            grapes,
-            lemon,
-            coconut,
-            apple,
-            orange,
-            pomegranate,
-            peach,
-            pineapple,
-            melon,
-            watermelon,
-        });
-    }
-}
-
-impl FruitType {
-    fn random() -> FruitType {
-        match rand::random::<u8>() % 5 {
-            0 => FruitType::Blueberry,
-            1 => FruitType::Strawberry,
-            2 => FruitType::Grapes,
-            3 => FruitType::Lemon,
-            4 => FruitType::Coconut,
-            _ => unreachable!(),
-        }
-    }
-
-    fn size(&self) -> f32 {
-        // FRUIT SIZES DEFINED HERE (in pixels)
-        match self {
-            FruitType::Blueberry => 30.0,
-            FruitType::Strawberry => 50.0,
-            FruitType::Grapes => 70.0,
-            FruitType::Lemon => 100.0,
-            FruitType::Coconut => 120.0,
-            FruitType::Apple => 150.0,
-            FruitType::Orange => 180.0,
-            FruitType::Pomegranate => 210.0,
-            FruitType::Peach => 240.0,
-            FruitType::Pineapple => 270.0,
-            FruitType::Melon => 300.0,
-            FruitType::Watermelon => 330.0,
-        }
-    }
-
-    fn material(&self, fruit_materials: &Res<FruitMaterialHandles>) -> Handle<ColorMaterial> {
-        match self {
-            FruitType::Blueberry => fruit_materials.blueberry.clone(),
-            FruitType::Strawberry => fruit_materials.strawberry.clone(),
-            FruitType::Grapes => fruit_materials.grapes.clone(),
-            FruitType::Lemon => fruit_materials.lemon.clone(),
-            FruitType::Coconut => fruit_materials.coconut.clone(),
-            FruitType::Apple => fruit_materials.apple.clone(),
-            FruitType::Orange => fruit_materials.orange.clone(),
-            FruitType::Pomegranate => fruit_materials.pomegranate.clone(),
-            FruitType::Peach => fruit_materials.peach.clone(),
-            FruitType::Pineapple => fruit_materials.pineapple.clone(),
-            FruitType::Melon => fruit_materials.melon.clone(),
-            FruitType::Watermelon => fruit_materials.watermelon.clone(),
-        }
-    }
-
-    fn merge(&self) -> Option<FruitType> {
-        match self {
-            FruitType::Blueberry => Some(FruitType::Strawberry),
-            FruitType::Strawberry => Some(FruitType::Grapes),
-            FruitType::Grapes => Some(FruitType::Lemon),
-            FruitType::Lemon => Some(FruitType::Coconut),
-            FruitType::Coconut => Some(FruitType::Apple),
-            FruitType::Apple => Some(FruitType::Orange),
-            FruitType::Orange => Some(FruitType::Pomegranate),
-            FruitType::Pomegranate => Some(FruitType::Peach),
-            FruitType::Peach => Some(FruitType::Pineapple),
-            FruitType::Pineapple => Some(FruitType::Melon),
-            FruitType::Melon => Some(FruitType::Watermelon),
-            FruitType::Watermelon => None,
-        }
-    }
-}
-
-#[derive(Component)]
-struct Level();
 
 #[derive(Bundle)]
 struct WallBundle {
@@ -301,7 +166,7 @@ struct FruitPreview;
 fn drop_preview(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    fruit_materials: Res<FruitMaterialHandles>,
+    fruit_materials: Res<FruitMaterials>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     current_fruit_type: Res<CurrentFruitType>,
@@ -326,7 +191,7 @@ fn drop_preview(
                 commands.spawn((
                     MaterialMesh2dBundle {
                         mesh: meshes.add(shape::Circle::default().into()).into(),
-                        material: current_fruit_type.0.material(&fruit_materials),
+                        material: fruit_materials.get(&current_fruit_type.0).unwrap().clone(),
                         transform: Transform::from_translation(Vec3::new(
                             x,
                             FRUIT_SPAWN_HEIGHT,
@@ -347,7 +212,7 @@ fn drop_preview(
 fn drop_fruit(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    fruit_materials: Res<FruitMaterialHandles>,
+    fruit_materials: Res<FruitMaterials>,
     window_query: Query<&Window, With<PrimaryWindow>>,
     camera_query: Query<(&Camera, &GlobalTransform)>,
     mut timer: ResMut<DropTimer>,
@@ -379,7 +244,7 @@ fn drop_fruit(
         commands.spawn((
             MaterialMesh2dBundle {
                 mesh: meshes.add(shape::Circle::default().into()).into(),
-                material: fruit_type.material(&fruit_materials),
+                material: fruit_materials.get(&fruit_type).unwrap().clone(),
                 transform: Transform::from_translation(Vec3::new(x, FRUIT_SPAWN_HEIGHT, 0.0))
                     .with_scale(Vec3::splat(fruit_type.size())),
                 ..default()
@@ -414,72 +279,6 @@ fn tick_drop_timer(time: Res<Time>, mut timer: ResMut<DropTimer>) {
     timer.0.tick(time.delta());
 }
 
-// fn show_drop_preview()
-
-#[derive(Component)]
-struct HasCollided;
-
-fn handle_collisions(
-    mut commands: Commands,
-    rapier_context: Res<RapierContext>,
-    fruit_materials: Res<FruitMaterialHandles>,
-    fruit_entity_query: Query<Entity, With<Fruit>>,
-    mut fruit_query: Query<(&mut Fruit, &mut Transform, &mut Handle<ColorMaterial>)>,
-    has_collided_query: Query<&HasCollided>,
-    sound: Res<MergeSound>,
-) {
-    // might need to make this func faster or blocking or something
-    for entity1 in fruit_entity_query.iter() {
-        for entity2 in fruit_entity_query.iter() {
-            let contact_pair = rapier_context.contact_pair(entity1, entity2);
-            if contact_pair.is_none() {
-                continue;
-            }
-
-            if !contact_pair.unwrap().has_any_active_contacts() {
-                continue;
-            }
-            println!("{:?} contacting {:?}", entity1, entity2);
-
-            if let Some(fruit1) = fruit_query.get_component::<Fruit>(entity1).ok() {
-                if let Some(fruit2) = fruit_query.get_component::<Fruit>(entity2).ok() {
-                    if has_collided_query.get(entity1).is_err() {
-                        commands.entity(entity1).try_insert(HasCollided);
-                    }
-
-                    if has_collided_query.get(entity2).is_err() {
-                        commands.entity(entity2).try_insert(HasCollided);
-                    }
-
-                    if fruit1.0 == fruit2.0 {
-                        let new_fruit_type = fruit1.0.merge();
-
-                        if new_fruit_type.is_none() {
-                            continue;
-                        }
-
-                        let new_fruit_type = new_fruit_type.unwrap();
-
-                        commands.entity(entity2).despawn();
-
-                        if let Some((mut fruit, mut transform, mut material)) =
-                            fruit_query.get_mut(entity1).ok()
-                        {
-                            fruit.0 = new_fruit_type.clone();
-                            transform.scale = Vec3::splat(new_fruit_type.size());
-                            *material = new_fruit_type.material(&fruit_materials);
-                        }
-
-                        commands.spawn(AudioBundle {
-                            source: sound.0.choose(&mut rand::thread_rng()).unwrap().clone(),
-                            settings: PlaybackSettings::DESPAWN,
-                        });
-                    }
-                }
-            }
-        }
-    }
-}
 
 fn check_loss(
     mut commands: Commands,
@@ -546,7 +345,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(1.0))
         .add_plugins(RapierDebugRenderPlugin::default())
-        .add_plugins(FruitMaterialsPlugin)
+        .add_plugins(FruitPlugin)
         .add_state::<State>()
         .insert_resource(DropTimer(Timer::from_seconds(
             DROP_COOLDOWN,
@@ -554,7 +353,6 @@ fn main() {
         )))
         .insert_resource(CurrentFruitType(FruitType::random()))
         .add_systems(Startup, setup)
-        // .add_systems(FixedUpdate, handle_collisions)
         .add_systems(
             Update,
             (
